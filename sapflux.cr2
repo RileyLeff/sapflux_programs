@@ -1,339 +1,126 @@
-' Program Title: Implexx Sap Flow Sensor Data Logging (N=2) - CR200X Compatible v5
+' CR200/CR200X Series
+' Program Title: Implexx Sap Flow Sensor Standard Data (N=2) - Example Style v2
 
-' --- Declarations Section ---
+'Declare Variables and Units
 
-Const NumSens = 2              ' Number of sensors (shortened name, <= 16 chars)
-Const MeasInt = 30             ' Measurement interval in minutes (shortened name, <= 16 chars)
-Const SDIPort = 1              ' SDI-12 port number (adjust as needed)
-Const StdMeasWait = 100        ' Wait time after M! or C! in seconds (shortened name, <= 16 chars)
-Const AddMeasWait = 2          ' Wait time after Mn! or Cn! in seconds (shortened name, <= 16 chars)
+Const MeasInt = 30             ' Measurement interval in minutes (<= 16 chars)
+' SDI port is likely implicit or not explicitly configured in this example style
 
-' Declare Public arrays to store data from each sensor.
+' Declare Public arrays to store the 9 standard data points for each sensor.
 ' CR200X compatible Public array syntax: Public ArrayName(Size)
-Public AlphaOuter_Value(NumSens)    ' AlphaOuter
-Public AlphaInner_Value(NumSens)    ' AlphaInner
-Public BetaOuter_Value(NumSens)     ' BetaOuter
-Public BetaInner_Value(NumSens)     ' BetaInner
-Public tMaxTouter_Value(NumSens)    ' tMaxTouter
-Public tMaxTinner_Value(NumSens)    ' tMaxTinner
-
-Public TpreDsOuter_Value(NumSens)   ' TpreDsOuter
-Public dTmaxDsOuter_Value(NumSens)  ' dTmaxDsOuter
-Public TpostDsOuter_Value(NumSens)  ' TpostDsOuter
-Public TpreUsOuter_Value(NumSens)   ' TpreUsOuter
-Public dTmaxUsOuter_Value(NumSens)  ' dTmaxUsOuter
-Public TpostUsOuter_Value(NumSens)  ' TpostUsOuter
-
-Public TpreDsInner_Value(NumSens)   ' TpreDsInner
-Public dTmaxDsInner_Value(NumSens)  ' dTmaxDsInner
-Public TpostDsInner_Value(NumSens)  ' TpostDsInner
-Public TpreUsInner_Value(NumSens)   ' TpreUsInner
-Public dTmaxUsInner_Value(NumSens)  ' dTmaxUsInner
-Public TpostUsInner_Value(NumSens)  ' TpostUsInner
-
-Public tMaxTusOuter_Value(NumSens)  ' tMaxTusOuter
-Public tMaxTusInner_Value(NumSens)  ' tMaxTusInner
-
-' Declare variables for use within the scan
-Dim ReturnCode
-Dim CommandString * 10 ' Declare as string with fixed length
-Dim ExpectedValues     ' This will store the 'n' from the 'atttn' response, though we use fixed D calls
-Dim SDI12Response(3)   ' To capture the 'atttn' response (address, ttt, n)
+Public S0_StdData(9)    ' Standard data for Sensor 0 (9 values from M!/D0/D1)
+Public S1_StdData(9)    ' Standard data for Sensor 1 (9 values from M!/D0/D1)
 
 
-' Define the data table for 2 sensors with CR200X compatible field names (<= 12 chars).
-' Syntax: DataTable(Name, TrigVar, Size). Use True as TrigVar for logging every scan.
+' Use Alias to give meaningful names to the array elements (<= 12 characters).
+' These alias names will serve as both the variable names in the code and the Field Names in the DataTable.
+' Sensor 0 Standard Data (based on order from Implexx guide page 5)
+Alias S0_StdData(1) = S0_SFTotal    ' SapFlowTotal (1st value from D0)
+Alias S0_StdData(2) = S0_SFDOut     ' SFDOuter (2nd value from D0)
+Alias S0_StdData(3) = S0_SFDInn     ' SFDInner (3rd value from D0)
+Alias S0_StdData(4) = S0_AlpOut     ' AlphaOuter (4th value from D0)
+Alias S0_StdData(5) = S0_AlpInn     ' AlphaInner (5th value from D0)
+Alias S0_StdData(6) = S0_BetOut     ' BetaOuter (1st value from D1)
+Alias S0_StdData(7) = S0_BetInn     ' BetaInner (2nd value from D1)
+Alias S0_StdData(8) = S0_tMxOut     ' tMaxTouter (3rd value from D1)
+Alias S0_StdData(9) = S0_tMxInn     ' tMaxTinner (4th value from D1)
+
+' Sensor 1 Standard Data
+Alias S1_StdData(1) = S1_SFTotal    ' SapFlowTotal
+Alias S1_StdData(2) = S1_SFDOut     ' SFDOuter
+Alias S1_StdData(3) = S1_SFDInn     ' SFDInner
+Alias S1_StdData(4) = S1_AlpOut     ' AlphaOuter
+Alias S1_StdData(5) = S1_AlpInn     ' AlphaInner
+Alias S1_StdData(6) = S1_BetOut     ' BetaOuter
+Alias S1_StdData(7) = S1_BetInn     ' BetaInner
+Alias S1_StdData(8) = S1_tMxOut     ' tMaxTouter
+Alias S1_StdData(9) = S1_tMxInn     ' tMaxTinner
+
+
+' Additional variables from example
+Public BattV
+Public id
+Public SDI0 ' Used as a placeholder for sensor 0 address
+Public SDI1 ' Used as a placeholder for sensor 1 address
+
+' Declare loop counters (from example)
+Dim N
+Dim N_2
+
+
+'Define a Single Data Table for all sensors
+' Syntax from example: DataTable(Name, TrigVar, Size)
 DataTable(SapFlowData, True, -1) ' Log data every scan until memory is full
 
-  ' DataInterval is not needed here if logging every scan.
-  ' If you wanted to scan faster but log less often, you would add:
-  ' DataInterval(0, MeasInt, Min)
+	' DataInterval from example
+	DataInterval(0,MeasInt,Min) ' Log every MeasInt minutes
 
-  ' Sensor 0 Data (S0_ plus abbreviated name, total <= 12 chars)
-  ' Sample syntax: Sample(Reps, Source)
-  FieldNames("S0_AlpOut") : Sample(1, AlphaOuter_Value(0))
-  FieldNames("S0_AlpInn") : Sample(1, AlphaInner_Value(0))
-  FieldNames("S0_BetOut") : Sample(1, BetaOuter_Value(0))
-  FieldNames("S0_BetInn") : Sample(1, BetaInner_Value(0))
-  FieldNames("S0_tMxOut") : Sample(1, tMaxTouter_Value(0))
-  FieldNames("S0_tMxInn") : Sample(1, tMaxTinner_Value(0))
+	' Sample instructions from example - variable names (aliases) become field names
+	Minimum(1,BattV,False,False)
+	Sample(1,id)
+	Sample(1,SDI0) ' Placeholder
+	Sample(1,SDI1) ' Placeholder
 
-  FieldNames("S0_TpDOut") : Sample(1, TpreDsOuter_Value(0))
-  FieldNames("S0_dTDOut") : Sample(1, dTmaxDsOuter_Value(0))
-  FieldNames("S0_TsDOut") : Sample(1, TpostDsOuter_Value(0))
-  FieldNames("S0_TpUOut") : Sample(1, TpreUsOuter_Value(0))
-  FieldNames("S0_dTUOut") : Sample(1, dTmaxUsOuter_Value(0))
-  FieldNames("S0_TsUOut") : Sample(1, TpostUsOuter_Value(0))
+	' Sample the 9 standard values for Sensor 0 using the aliases
+	Sample(1,S0_SFTotal)
+	Sample(1,S0_SFDOut)
+	Sample(1,S0_SFDInn)
+	Sample(1,S0_AlpOut)
+	Sample(1,S0_AlpInn)
+	Sample(1,S0_BetOut)
+	Sample(1,S0_BetInn)
+	Sample(1,S0_tMxOut)
+	Sample(1,S0_tMxInn)
 
-  FieldNames("S0_TpDInn") : Sample(1, TpreDsInner_Value(0))
-  FieldNames("S0_dTDInn") : Sample(1, dTmaxDsInner_Value(0))
-  FieldNames("S0_TsDInn") : Sample(1, TpostDsInner_Value(0))
-  FieldNames("S0_TpUInn") : Sample(1, TpreUsInner_Value(0))
-  FieldNames("S0_dTUInn") : Sample(1, dTmaxUsInner_Value(0))
-  FieldNames("S0_TsUInn") : Sample(1, TpostUsInner_Value(0))
+	' Sample the 9 standard values for Sensor 1 using the aliases
+	Sample(1,S1_SFTotal)
+	Sample(1,S1_SFDOut)
+	Sample(1,S1_SFDInn)
+	Sample(1,S1_AlpOut)
 
-  FieldNames("S0_tMxtOUt") : Sample(1, tMaxTusOuter_Value(0))
-  FieldNames("S0_tMxtInn") : Sample(1, tMaxTusInner_Value(0))
-
-  ' Sensor 1 Data (S1_ plus abbreviated name, total <= 12 chars)
-  FieldNames("S1_AlpOut") : Sample(1, AlphaOuter_Value(1))
-  FieldNames("S1_AlpInn") : Sample(1, AlphaInner_Value(1))
-  FieldNames("S1_BetOut") : Sample(1, BetaOuter_Value(1))
-  FieldNames("S1_BetInn") : Sample(1, BetaInner_Value(1))
-  FieldNames("S1_tMxOut") : Sample(1, tMaxTouter_Value(1))
-  FieldNames("S1_tMxInn") : Sample(1, tMaxTinner_Value(1))
-
-  FieldNames("S1_TpDOut") : Sample(1, TpreDsOuter_Value(1))
-  FieldNames("S1_dTDOut") : Sample(1, dTmaxDsOuter_Value(1))
-  FieldNames("S1_TsDOut") : Sample(1, TpostDsOuter_Value(1))
-  FieldNames("S1_TpUOut") : Sample(1, TpreUsOuter_Value(1))
-  FieldNames("S1_dTUOut") : Sample(1, dTmaxUsOuter_Value(1))
-  FieldNames("S1_TsUOut") : Sample(1, TpostUsOuter_Value(1))
-
-  FieldNames("S1_TpDInn") : Sample(1, TpreDsInner_Value(1))
-  FieldNames("S1_dTDInn") : Sample(1, dTmaxDsInner_Value(1))
-  FieldNames("S1_TsDInn") : Sample(1, TpostDsInner_Value(1))
-  FieldNames("S1_TpUInn") : Sample(1, TpreUsInner_Value(1))
-  FieldNames("S1_dTUInn") : Sample(1, dTmaxUsInner_Value(1))
-  FieldNames("S1_TsUInn") : Sample(1, TpostUsInner_Value(1))
-
-  FieldNames("S1_tMxtOUt") : Sample(1, tMaxTusOuter_Value(1))
-  FieldNames("S1_tMxtInn") : Sample(1, tMaxTusInner_Value(1))
 EndTable
 
 
-'--- Main Program ---
+'Main Program
 BeginProg
-  ' Configure the SDI-12 port
-  ' Syntax: SDI12Set (Port, Power, ReqAck, CRC, Protocol)
-  ' ReqAck: 0=no, 1=yes (True/False might also work depending on OS)
-  ' Power: 0=off, 1=on (True/False might also work) - Use True to let datalogger manage power
-  ' Protocol: 1.2 or 1.4
-  SDI12Set (SDIPort, True, 1, 0, 1.4) ' Enable port, manage power, require acknowledge, no CRC, protocol 1.4
 
-  ' Set the datalogger clock (optional, but good practice)
-  ' SetSetTime()
+	'Main Scan
+	' Syntax from example: Scan(Interval, Units)
+	Scan(MeasInt,Min)
+		'Default CR200 Series Datalogger Battery Voltage measurement 'BattV'
+		Battery(BattV)
 
-  ' Start the main scan loop
-  ' Syntax: Scan (Interval, Units)
-  Scan (MeasInt, Min) ' Scan every MeasInt minutes
+        ' User Entered Calculation (from example)
+        id = Status.PakBusAddress(1,1)
+        SDI0 = 0 ' Placeholder value
+        SDI1 = 1 ' Placeholder value
 
-    ' --- Collect data for Sensor 0 (Address "0") ---
-    CommandString = "0M!"
-    ' SDI12Recorder syntax for sending command: SDI12Recorder (ReturnCode, SDIPort, Command, ExpectedValues, Dest, Reps, Multiplier)
-    ' When sending M/C, ExpectedValues is populated with 'n' from atttn response. Dest is optional, can store atttn. Reps/Multiplier typically 0/1.
-    SDI12Recorder (ReturnCode, SDIPort, CommandString, ExpectedValues, SDI12Response(0), 0, 0) ' Send command, capture atttn into SDI12Response array
+		' --- Collect standard data for Sensor 0 (Address "0") using example syntax ---
+		' SDI12Recorder syntax from example: SDI12Recorder(ArrayName(), "aM!", 1, 0)
+		' This call initiates the standard measurement and populates the array elements 1 through 9.
+		' The aliases then point to these populated elements.
+		SDI12Recorder(S0_StdData(), "0M!", 1, 0)
 
-    If ReturnCode <> 0 Then
-      ' Handle error for M! command transmission for S0
-      AlphaOuter_Value(0) = NAN : AlphaInner_Value(0) = NAN : BetaOuter_Value(0) = NAN : BetaInner_Value(0) = NAN
-      tMaxTouter_Value(0) = NAN : tMaxTinner_Value(0) = NAN
-      TpreDsOuter_Value(0) = NAN : dTmaxDsOuter_Value(0) = NAN : TpostDsOuter_Value(0) = NAN
-      TpreUsOuter_Value(0) = NAN : dTmaxUsOuter_Value(0) = NAN : TpostUsOuter_Value(0) = NAN
-      TpreDsInner_Value(0) = NAN : dTmaxDsInner_Value(0) = NAN : TpostDsInner_Value(0) = NAN
-      TpreUsInner_Value(0) = NAN : dTmaxUsInner_Value(0) = NAN : TpostUsInner_Value(0) = NAN
-      tMaxTusOuter_Value(0) = NAN : tMaxTusInner_Value(0) = NAN
-    Else
-      ' ExpectedValues (SDI12Response(2)) now holds 'n'. We know the D calls provide fixed numbers of values anyway.
-      ' Pause for the measurement completion time.
-      Pause StdMeasWait * 1000 ' Pause instruction uses milliseconds
+		'Reset all Generic SDI-12 Sensor measurements if NAN is returned to the first element (example style)
+		If S0_StdData(1) = NAN Then
+			For N = 1 To 9
+				S0_StdData(N) = NAN
+			Next
+		EndIf
 
-      ' Issue D0! to get the first set of standard values (5 values).
-      ' Syntax for reading data: SDI12Recorder (ReturnCode, SDIPort, Command, ExpectedValues, Dest, Reps, Multiplier)
-      ' Dest is the starting variable/array. Reps is number of values to read. ExpectedValues is ignored here.
-      CommandString = "0D0!"
-      SDI12Recorder (ReturnCode, SDIPort, CommandString, ExpectedValues, AlphaOuter_Value(0), 2, 1) ' Read 2 values into AlphaOuter_Value(0) and AlphaInner_Value(0) - This is incorrect based on D0 output order.
+		' --- Collect standard data for Sensor 1 (Address "1") using example syntax ---
+		SDI12Recorder(S1_StdData(), "1M!", 1, 0)
 
-      ' Corrected D0 read: D0 gives SapFlowTotal, SFDOuter, SFDInner, AlphaOuter, AlphaInner (5 values)
-      ' We need AlphaOuter and AlphaInner. We can read all 5 into a temporary array or individual variables and pick the ones we need.
-      ' Given CR200X array limits for Dim, reading into Public arrays is better.
-      ' Let's read all 5 values from D0 into a temp Public array if possible, or individual Dim variables then assign.
-      ' Based on the Short Cut example using Public arrays for data, let's use a Public temp array.
-      Public TempD0Values(5) ' Declare this outside the scan
-      SDI12Recorder (ReturnCode, SDIPort, CommandString, ExpectedValues, TempD0Values(0), 5, 1) ' Read 5 values into TempD0Values(0) to (4)
-
-      If ReturnCode <> 0 Then
-        AlphaOuter_Value(0) = NAN : AlphaInner_Value(0) = NAN
-      Else
-        AlphaOuter_Value(0) = TempD0Values(3) ' AlphaOuter is the 4th value (index 3)
-        AlphaInner_Value(0) = TempD0Values(4) ' AlphaInner is the 5th value (index 4)
-      EndIf
+		'Reset all Generic SDI-12 Sensor measurements if NAN is returned to the first element (example style)
+		If S1_StdData(1) = NAN Then
+			For N_2 = 1 To 9
+				S1_StdData(N_2) = NAN
+			Next
+		EndIf
 
 
-      ' Issue D1! to get the second set of standard values (4 values).
-      ' D1 gives BetaOuter, BetaInner, tMaxTouter, tMaxTinner
-      CommandString = "0D1!"
-      Public TempD1Values(4) ' Declare this outside the scan
-      SDI12Recorder (ReturnCode, SDIPort, CommandString, ExpectedValues, TempD1Values(0), 4, 1) ' Read 4 values into TempD1Values(0) to (3)
-
-      If ReturnCode <> 0 Then
-        BetaOuter_Value(0) = NAN : BetaInner_Value(0) = NAN : tMaxTouter_Value(0) = NAN : tMaxTinner_Value(0) = NAN
-      Else
-        BetaOuter_Value(0) = TempD1Values(0)
-        BetaInner_Value(0) = TempD1Values(1)
-        tMaxTouter_Value(0) = TempD1Values(2)
-        tMaxTinner_Value(0) = TempD1Values(3)
-      EndIf
-
-
-      ' --- Additional Measurement M1! (Outer Thermistors - 6 values) ---
-      CommandString = "0M1!"
-      SDI12Recorder (ReturnCode, SDIPort, CommandString, ExpectedValues, SDI12Response(0), 0, 0)
-      If ReturnCode <> 0 Then
-         TpreDsOuter_Value(0) = NAN : dTmaxDsOuter_Value(0) = NAN : TpostDsOuter_Value(0) = NAN
-         TpreUsOuter_Value(0) = NAN : dTmaxUsOuter_Value(0) = NAN : TpostUsOuter_Value(0) = NAN
-      Else
-        Pause AddMeasWait * 1000
-        CommandString = "0D0!"
-        Public TempM1Values(6) ' Declare this outside the scan
-        SDI12Recorder (ReturnCode, SDIPort, CommandString, ExpectedValues, TempM1Values(0), 6, 1) ' Read 6 values
-
-        If ReturnCode <> 0 Then
-           TpreDsOuter_Value(0) = NAN : dTmaxDsOuter_Value(0) = NAN : TpostDsOuter_Value(0) = NAN
-           TpreUsOuter_Value(0) = NAN : dTmaxUsOuter_Value(0) = NAN : TpostUsOuter_Value(0) = NAN
-        Else
-           TpreDsOuter_Value(0) = TempM1Values(0) : dTmaxDsOuter_Value(0) = TempM1Values(1) : TpostDsOuter_Value(0) = TempM1Values(2)
-           TpreUsOuter_Value(0) = TempM1Values(3) : dTmaxUsOuter_Value(0) = TempM1Values(4) : TpostUsOuter_Value(0) = TempM1Values(5)
-        EndIf
-      EndIf
-
-
-      ' --- Additional Measurement M2! (Inner Thermistors - 6 values) ---
-      CommandString = "0M2!"
-      SDI12Recorder (ReturnCode, SDIPort, CommandString, ExpectedValues, SDI12Response(0), 0, 0)
-       If ReturnCode <> 0 Then
-         TpreDsInner_Value(0) = NAN : dTmaxDsInner_Value(0) = NAN : TpostDsInner_Value(0) = NAN
-         TpreUsInner_Value(0) = NAN : dTmaxUsInner_Value(0) = NAN : TpostUsInner_Value(0) = NAN
-      Else
-        Pause AddMeasWait * 1000
-        CommandString = "0D0!"
-        Public TempM2Values(6) ' Declare this outside the scan
-        SDI12Recorder (ReturnCode, SDIPort, CommandString, ExpectedValues, TempM2Values(0), 6, 1) ' Read 6 values
-
-        If ReturnCode <> 0 Then
-           TpreDsInner_Value(0) = NAN : dTmaxDsInner_Value(0) = NAN : TpostDsInner_Value(0) = NAN
-           TpreUsInner_Value(0) = NAN : dTmaxUsInner_Value(0) = NAN : TpostUsInner_Value(0) = NAN
-        Else
-           TpreDsInner_Value(0) = TempM2Values(0) : dTmaxDsInner_Value(0) = TempM2Values(1) : TpostDsInner_Value(0) = TempM2Values(2)
-           TpreUsInner_Value(0) = TempM2Values(3) : dTmaxUsInner_Value(0) = TempM2Values(4) : TpostUsInner_Value(0) = TempM2Values(5)
-        EndIf
-      EndIf
-
-
-      ' --- Additional Measurement M5! (Upstream Max Temp Time - 2 values) ---
-      CommandString = "0M5!"
-      SDI12Recorder (ReturnCode, SDIPort, CommandString, ExpectedValues, SDI12Response(0), 0, 0)
-       If ReturnCode <> 0 Then
-         tMaxTusOuter_Value(0) = NAN : tMaxTusInner_Value(0) = NAN
-      Else
-        Pause AddMeasWait * 1000
-        CommandString = "0D0!"
-        Public TempM5Values(2) ' Declare this outside the scan
-        SDI12Recorder (ReturnCode, SDIPort, CommandString, ExpectedValues, TempM5Values(0), 2, 1) ' Read 2 values
-
-        If ReturnCode <> 0 Then
-           tMaxTusOuter_Value(0) = NAN : tMaxTusInner_Value(0) = NAN
-        Else
-           tMaxTusOuter_Value(0) = TempM5Values(0) : tMaxTusInner_Value(0) = TempM5Values(1)
-        EndIf
-      EndIf
-    EndIf ' End M! error handling for S0
-
-
-    ' --- Collect data for Sensor 1 (Address "1") ---
-    CommandString = "1M!"
-    SDI12Recorder (ReturnCode, SDIPort, CommandString, ExpectedValues, SDI12Response(0), 0, 0)
-     If ReturnCode <> 0 Then
-      AlphaOuter_Value(1) = NAN : AlphaInner_Value(1) = NAN : BetaOuter_Value(1) = NAN : BetaInner_Value(1) = NAN
-      tMaxTouter_Value(1) = NAN : tMaxTinner_Value(1) = NAN
-      TpreDsOuter_Value(1) = NAN : dTmaxDsOuter_Value(1) = NAN : TpostDsOuter_Value(1) = NAN
-      TpreUsOuter_Value(1) = NAN : dTmaxUsOuter_Value(1) = NAN : TpostUsOuter_Value(1) = NAN
-      TpreDsInner_Value(1) = NAN : dTmaxDsInner_Value(1) = NAN : TpostDsInner_Value(1) = NAN
-      TpreUsInner_Value(1) = NAN : dTmaxUsInner_Value(1) = NAN : TpostUsInner_Value(1) = NAN
-      tMaxTusOuter_Value(1) = NAN : tMaxTusInner_Value(1) = NAN
-    Else
-      Pause StdMeasWait * 1000
-
-      CommandString = "1D0!"
-      SDI12Recorder (ReturnCode, SDIPort, CommandString, ExpectedValues, TempD0Values(0), 5, 1)
-       If ReturnCode <> 0 Then
-        AlphaOuter_Value(1) = NAN : AlphaInner_Value(1) = NAN
-      Else
-        AlphaOuter_Value(1) = TempD0Values(3) : AlphaInner_Value(1) = TempD0Values(4)
-      EndIf
-
-      CommandString = "1D1!"
-      SDI12Recorder (ReturnCode, SDIPort, CommandString, ExpectedValues, TempD1Values(0), 4, 1)
-      If ReturnCode <> 0 Then
-        BetaOuter_Value(1) = NAN : BetaInner_Value(1) = NAN : tMaxTouter_Value(1) = NAN : tMaxTinner_Value(1) = NAN
-      Else
-        BetaOuter_Value(1) = TempD1Values(0) : BetaInner_Value(1) = TempD1Values(1) : tMaxTouter_Value(1) = TempD1Values(2) : tMaxTinner_Value(1) = TempD1Values(3)
-      EndIf
-
-      CommandString = "1M1!"
-      SDI12Recorder (ReturnCode, SDIPort, CommandString, ExpectedValues, SDI12Response(0), 0, 0)
-       If ReturnCode <> 0 Then
-         TpreDsOuter_Value(1) = NAN : dTmaxDsOuter_Value(1) = NAN : TpostDsOuter_Value(1) = NAN
-         TpreUsOuter_Value(1) = NAN : dTmaxUsOuter_Value(1) = NAN : TpostUsOuter_Value(1) = NAN
-      Else
-        Pause AddMeasWait * 1000
-        CommandString = "1D0!"
-        SDI12Recorder (ReturnCode, SDIPort, CommandString, ExpectedValues, TempM1Values(0), 6, 1)
-        If ReturnCode <> 0 Then
-           TpreDsOuter_Value(1) = NAN : dTmaxDsOuter_Value(1) = NAN : TpostDsOuter_Value(1) = NAN
-           TpreUsOuter_Value(1) = NAN : dTmaxUsOuter_Value(1) = NAN : TpostUsOuter_Value(1) = NAN
-        Else
-           TpreDsOuter_Value(1) = TempM1Values(0) : dTmaxDsOuter_Value(1) = TempM1Values(1) : TpostDsOuter_Value(1) = TempM1Values(2)
-           TpreUsOuter_Value(1) = TempM1Values(3) : dTmaxUsOuter_Value(1) = TempM1Values(4) : TpostUsOuter_Value(1) = TempM1Values(5)
-        EndIf
-      EndIf
-
-      CommandString = "1M2!"
-      SDI12Recorder (ReturnCode, SDIPort, CommandString, ExpectedValues, SDI12Response(0), 0, 0)
-       If ReturnCode <> 0 Then
-         TpreDsInner_Value(1) = NAN : dTmaxDsInner_Value(1) = NAN : TpostDsInner_Value(1) = NAN
-         TpreUsInner_Value(1) = NAN : dTmaxUsInner_Value(1) = NAN : TpostUsInner_Value(1) = NAN
-      Else
-        Pause AddMeasWait * 1000
-        CommandString = "1D0!"
-        SDI12Recorder (ReturnCode, SDIPort, CommandString, ExpectedValues, TempM2Values(0), 6, 1)
-        If ReturnCode <> 0 Then
-           TpreDsInner_Value(1) = NAN : dTmaxDsInner_Value(1) = NAN : TpostDsInner_Value(1) = NAN
-           TpreUsInner_Value(1) = NAN : dTmaxUsInner_Value(1) = NAN : TpostUsInner_Value(1) = NAN
-        Else
-           TpreDsInner_Value(1) = TempM2Values(0) : dTmaxDsInner_Value(1) = TempM2Values(1) : TpostDsInner_Value(1) = TempM2Values(2)
-           TpreUsInner_Value(1) = TempM2Values(3) : dTmaxUsInner_Value(1) = TempM2Values(4) : TpostUsInner_Value(1) = TempM2Values(5)
-        EndIf
-      EndIf
-
-      CommandString = "1M5!"
-      SDI12Recorder (ReturnCode, SDIPort, CommandString, ExpectedValues, SDI12Response(0), 0, 0)
-       If ReturnCode <> 0 Then
-         tMaxTusOuter_Value(1) = NAN : tMaxTusInner_Value(1) = NAN
-      Else
-        Pause AddMeasWait * 1000
-        CommandString = "1D0!"
-        SDI12Recorder (ReturnCode, SDIPort, CommandString, ExpectedValues, TempM5Values(0), 2, 1)
-        If ReturnCode <> 0 Then
-           tMaxTusOuter_Value(1) = NAN : tMaxTusInner_Value(1) = NAN
-        Else
-           tMaxTusOuter_Value(1) = TempM5Values(0) : tMaxTusInner_Value(1) = TempM5Values(1)
-        EndIf
-      EndIf
-    EndIf ' End M! error handling for S1
-
-
-    ' Log the collected data for all sensors
-    CallTable SapFlowData ' Use CallTable to log data to the defined table
-
-  NextScan ' End of main scan loop
-
-  ' Declare Public temporary arrays used within the scan (needed here if declared inside Scan previously)
-  Public TempD0Values(5)
-  Public TempD1Values(4)
-  Public TempM1Values(6)
-  Public TempM2Values(6)
-  Public TempM5Values(2)
-
-
-EndProg ' End of program
+		'Call Data Table and Store Data
+		' Syntax from example: CallTable TableName
+		CallTable SapFlowData
+	NextScan
+EndProg
