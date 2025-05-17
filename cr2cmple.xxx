@@ -1,26 +1,15 @@
 sapflux.cr2 -- Compile Failed!
 
-line 8: Const Name StandardMeasureWait is too large, limit is 16 characters.
-line 9: Const Name AdditionalMeasureWait is too large, limit is 16 characters.
-line 14: Variable AlphaOuter_Value dimension exceeds max of 1.
-line 15: Variable AlphaInner_Value dimension exceeds max of 1.
-line 16: Variable BetaOuter_Value dimension exceeds max of 1.
-line 17: Variable BetaInner_Value dimension exceeds max of 1.
-line 18: Variable tMaxTouter_Value dimension exceeds max of 1.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+line 64: Too many parameters:  as.
+line 65: Too many parameters:  as.
+line 66: Too many parameters:  as.
+line 67: Variable TempValues dimension exceeds max of 1.
+line 72: No Matching, or out of place ) in expression: (1, True) .
+line 72: Invalid or missing parameter.
+line 74: Too many parameters:  IEEE4.
+line 75: Too many parameters:  IEEE4.
+line 76: Too many parameters:  IEEE4.
+line 77: Too many parameters:  IEEE4.
+line 78: Too many parameters:  IEEE4.
+line 79: Too many parameters:  IEEE4.
 
