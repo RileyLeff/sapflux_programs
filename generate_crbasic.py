@@ -1,10 +1,13 @@
-#!/usr/bin/env uv run python
+#!/usr/bin/env python3
 # /// script
 # dependencies:
 # ///
 
 import sys
 import argparse # For command-line arguments
+
+MAX_SDI12_SENSORS = 62
+MIN_MEASURE_INTERVAL_MINUTES = 15
 
 def generate_crbasic_program(num_sensors, measure_interval_min):
     """
@@ -13,18 +16,20 @@ def generate_crbasic_program(num_sensors, measure_interval_min):
     Adheres to CR200X limitations (16 fields per table, 12-char DataTable names, specific syntax).
 
     Args:
-        num_sensors (int): The number of sensors (0 to N-1).
-        measure_interval_min (int): The measurement interval in minutes.
+        num_sensors (int): The number of sensors (1 to MAX_SDI12_SENSORS).
+        measure_interval_min (int): The measurement interval in minutes (>= MIN_MEASURE_INTERVAL_MINUTES).
 
     Returns:
         str: The generated CRBasic program as a string.
     """
 
-    if num_sensors <= 0:
-        return "' Error: Number of sensors must be at least 1."
+    # Validation (already done by argparse, but good to have in function if called directly)
+    if not (1 <= num_sensors <= MAX_SDI12_SENSORS):
+        return f"' Error: Number of sensors must be between 1 and {MAX_SDI12_SENSORS}."
+    if measure_interval_min < MIN_MEASURE_INTERVAL_MINUTES:
+        return f"' Error: Measurement interval must be at least {MIN_MEASURE_INTERVAL_MINUTES} minutes."
 
     # Define the 9 standard measurement names and their units based on your example
-    # Shortened names for CR200X field name limit (<= 12 characters)
     standard_measurements = [
         ("SapFlwTot", "literPerHour"),
         ("VhOuter", "heatVelocity"), # Based on example alias, likely SFDOuter
@@ -36,6 +41,18 @@ def generate_crbasic_program(num_sensors, measure_interval_min):
         ("tMaxTout", "second"),
         ("tMaxTin", "second"),
     ]
+
+    # Helper to convert sensor index (0-61) to SDI-12 address character
+    def get_sdi12_address_char(index):
+        if 0 <= index <= 9:
+            return str(index)
+        elif 10 <= index <= 35: # a-z
+            return chr(ord('a') + (index - 10))
+        elif 36 <= index <= 61: # A-Z
+            return chr(ord('A') + (index - 36))
+        else:
+            raise ValueError("Sensor index out of SDI-12 addressable range (0-61)")
+
 
     crbasic_code = ""
 
@@ -50,12 +67,12 @@ def generate_crbasic_program(num_sensors, measure_interval_min):
     # --- Declare Variables and Units ---
     crbasic_code += "'--- Declare Variables and Units ---\n"
 
-    # Declare loop counters (as in example, using N_i for sensor i's error loop if N > 1)
+    # Declare loop counters
     if num_sensors == 1:
         crbasic_code += "Dim N\n"
     else:
         for i in range(num_sensors):
-            crbasic_code += f"Dim N_{i} ' Loop counter for Sensor {i} error handling\n"
+            crbasic_code += f"Dim N_{i} ' Loop counter for Sensor {get_sdi12_address_char(i)} error handling\n"
 
 
     # Declare Public BattV and id (from example)
@@ -64,32 +81,34 @@ def generate_crbasic_program(num_sensors, measure_interval_min):
 
     # Declare Public arrays for each sensor's standard data (9 values)
     for i in range(num_sensors):
-        crbasic_code += f"Public SDIData_Sensor{i}(9)\n"
+        crbasic_code += f"Public SDIData_Sensor{get_sdi12_address_char(i)}(9)\n" # Use address char in array name for uniqueness
 
     # Declare Public variables for sensor addresses (placeholders from example)
     for i in range(num_sensors):
-         crbasic_code += f"Public SensorAddress{i}\n"
+         crbasic_code += f"Public SensorAddress{get_sdi12_address_char(i)}\n" # Use address char for uniqueness
 
 
     # Declare Alias for each sensor's standard data points (<= 12 characters)
     crbasic_code += "\n'--- Alias Declarations (Maps array elements to meaningful names) ---\n"
     for i in range(num_sensors):
+        sdi_address_char = get_sdi12_address_char(i)
         for j in range(len(standard_measurements)):
-            alias_name = f"{standard_measurements[j][0]}{i}"
-            # Ensure alias names are <= 12 characters
-            if len(alias_name) > 12:
-                 # This shouldn't happen with current names and num_sensors < 10
+            # Construct alias name: MeasurementType + SDIAddressChar
+            # e.g., SapFlwTot0, SapFlwTota, SapFlwTotA
+            alias_name = f"{standard_measurements[j][0]}{sdi_address_char}"
+            if len(alias_name) > 12: # Should be fine with current short measurement names
                  pass
-            crbasic_code += f"Alias SDIData_Sensor{i}({j+1}) = {alias_name}\n" # SDI-12 arrays are 1-indexed
+            crbasic_code += f"Alias SDIData_Sensor{sdi_address_char}({j+1}) = {alias_name}\n"
 
 
     # Declare Units for each aliased variable and BattV
     crbasic_code += "\n'--- Units Declarations ---\n"
-    crbasic_code += "Units BattV=Volts\n" # Unit for BattV from example
+    crbasic_code += "Units BattV=Volts\n"
 
     for i in range(num_sensors):
+        sdi_address_char = get_sdi12_address_char(i)
         for j in range(len(standard_measurements)):
-            alias_name = f"{standard_measurements[j][0]}{i}"
+            alias_name = f"{standard_measurements[j][0]}{sdi_address_char}"
             unit = standard_measurements[j][1]
             crbasic_code += f"Units {alias_name}={unit}\n"
 
@@ -99,20 +118,20 @@ def generate_crbasic_program(num_sensors, measure_interval_min):
     crbasic_code += "' DataTable names must be <= 12 characters.\n"
 
     for i in range(num_sensors):
-        table_name = f"Table_S{i}" # Shortened DataTable name (e.g., Table_S0, Table_S1)
-        if len(table_name) > 12:
-            # This should not happen with current naming for N < 100
+        sdi_address_char = get_sdi12_address_char(i)
+        # Shortened DataTable name: Table_ + S + AddressChar (e.g., Table_S0, Table_Sa, Table_SA)
+        table_name = f"Table_S{sdi_address_char}"
+        if len(table_name) > 12: # Unlikely with single char address
             return f"' Error: Generated DataTable name '{table_name}' is too long."
 
         crbasic_code += f"DataTable({table_name},True,-1)\n"
         crbasic_code += f"\tDataInterval(0,{measure_interval_min},Min)\n"
-        crbasic_code += "\tMinimum(1,BattV,False,False)\n" # Metadata from example
-        crbasic_code += "\tSample(1,id)\n" # Metadata from example
-        crbasic_code += f"\tSample(1,SensorAddress{i})\n" # Sensor address placeholder
+        crbasic_code += "\tMinimum(1,BattV,False,False)\n"
+        crbasic_code += "\tSample(1,id)\n"
+        crbasic_code += f"\tSample(1,SensorAddress{sdi_address_char})\n"
 
-        # Sample the 9 standard values for this sensor using aliases (these become field names)
         for j in range(len(standard_measurements)):
-            alias_name = f"{standard_measurements[j][0]}{i}"
+            alias_name = f"{standard_measurements[j][0]}{sdi_address_char}"
             crbasic_code += f"\tSample(1,{alias_name})\n"
 
         crbasic_code += "EndTable\n\n"
@@ -133,22 +152,32 @@ def generate_crbasic_program(num_sensors, measure_interval_min):
     crbasic_code += "\t\t'User Entered Calculation (from example)\n"
     crbasic_code += "\t\tid = Status.PakBusAddress(1,1)\n"
     for i in range(num_sensors):
-        crbasic_code += f"\t\tSensorAddress{i} = {i}\n" # Assign sensor address placeholder
+        sdi_address_char = get_sdi12_address_char(i)
+        # Store the actual SDI-12 address character (0-9, a-z, A-Z)
+        # The SensorAddressX variable will hold this for logging.
+        # For CRBasic string assignment, we'd need StrClip if it were a string variable.
+        # However, the example uses SensorAddressX = i (integer).
+        # Let's keep it as integer for consistency with example, assuming it's just a logged ID.
+        # If the actual character was needed in a string variable:
+        # crbasic_code += f"\t\tStrClip(SensorAddress{sdi_address_char}, 0, \"{sdi_address_char}\")\n"
+        crbasic_code += f"\t\tSensorAddress{sdi_address_char} = {i} ' Sensor index (0 to N-1)\n"
+
 
     crbasic_code += "\n"
 
     # SDI-12 communication and error handling for each sensor
     for i in range(num_sensors):
+        sdi_address_char_cmd = get_sdi12_address_char(i) # For the M! command
+        sdi_address_char_var = get_sdi12_address_char(i) # For variable names like SDIData_SensorX
         loop_counter = "N" if num_sensors == 1 else f"N_{i}"
-        crbasic_code += f"\t\t' --- Collect standard data for Sensor {i} (Address \"{i}\") ---\n"
-        # Use the exact SDI12Recorder syntax from the example for standard measurements
-        crbasic_code += f"\t\tSDI12Recorder(SDIData_Sensor{i}(), \"{i}M!\", 1, 0)\n"
 
-        # Error handling (example style)
+        crbasic_code += f"\t\t' --- Collect standard data for Sensor {sdi_address_char_cmd} (Address \"{sdi_address_char_cmd}\") ---\n"
+        crbasic_code += f"\t\tSDI12Recorder(SDIData_Sensor{sdi_address_char_var}(), \"{sdi_address_char_cmd}M!\", 1, 0)\n"
+
         crbasic_code += f"\t\t'Reset all Generic SDI-12 Sensor measurements if NAN is returned to the first element\n"
-        crbasic_code += f"\t\tIf SDIData_Sensor{i}(1) = NAN Then\n"
+        crbasic_code += f"\t\tIf SDIData_Sensor{sdi_address_char_var}(1) = NAN Then\n"
         crbasic_code += f"\t\t\tFor {loop_counter} = 1 To 9\n"
-        crbasic_code += f"\t\t\t\tSDIData_Sensor{i}({loop_counter}) = NAN\n"
+        crbasic_code += f"\t\t\t\tSDIData_Sensor{sdi_address_char_var}({loop_counter}) = NAN\n"
         crbasic_code += f"\t\t\tNext\n"
         crbasic_code += f"\t\tEndIf\n\n"
 
@@ -156,7 +185,8 @@ def generate_crbasic_program(num_sensors, measure_interval_min):
     # Call Data Tables and Store Data (one call per sensor's table)
     crbasic_code += "\t\t'Call Data Tables and Store Data\n"
     for i in range(num_sensors):
-        table_name = f"Table_S{i}"
+        sdi_address_char = get_sdi12_address_char(i)
+        table_name = f"Table_S{sdi_address_char}"
         crbasic_code += f"\t\tCallTable {table_name}\n"
 
     # End Scan loop
@@ -171,24 +201,32 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Generate CRBasic code for Implexx Sap Flow Sensors on CR200/CR200X.",
         formatter_class=argparse.RawTextHelpFormatter,
-        epilog="""\
+        epilog=f"""\
+ SDI-12 Address Notes:
+  Sensors will be addressed from 0 up to N-1.
+  The script converts the sensor index (0-61) to the corresponding
+  SDI-12 address character (0-9, a-z, A-Z) for use in commands
+  and variable/table names.
+
 Example usage:
-  python %(prog)s 2 30 -o sapflux_2_sensors.cr2
+  python %(prog)s -n 2 -t 30 -o sapflux_2_sensors.cr2
   (Generates code for 2 sensors, 30-minute interval, output to sapflux_2_sensors.cr2)
 
-  python %(prog)s 1 60
+  python %(prog)s -n 1 -t 60
   (Generates code for 1 sensor, 60-minute interval, prints to console)
 """
     )
     parser.add_argument(
-        "num_sensors",
+        "-n", "--num_sensors",
         type=int,
-        help="The number of sensors (N, integer, e.g., 1, 2, 3)."
+        required=True,
+        help=f"The number of sensors (N, integer, 1 to {MAX_SDI12_SENSORS})."
     )
     parser.add_argument(
-        "measure_interval",
+        "-t", "--measure_interval",
         type=int,
-        help="The measurement interval in minutes (T, integer, e.g., 30, 60)."
+        required=True,
+        help=f"The measurement interval in minutes (T, integer, >= {MIN_MEASURE_INTERVAL_MINUTES})."
     )
     parser.add_argument(
         "-o", "--output",
@@ -199,11 +237,11 @@ Example usage:
 
     args = parser.parse_args()
 
-    if args.num_sensors < 1:
-        print("Error: Number of sensors must be at least 1.")
+    if not (1 <= args.num_sensors <= MAX_SDI12_SENSORS):
+        print(f"Error: Number of sensors must be between 1 and {MAX_SDI12_SENSORS}.")
         sys.exit(1)
-    if args.measure_interval <= 0:
-         print("Error: Measurement interval must be a positive integer.")
+    if args.measure_interval < MIN_MEASURE_INTERVAL_MINUTES:
+         print(f"Error: Measurement interval must be at least {MIN_MEASURE_INTERVAL_MINUTES} minutes.")
          sys.exit(1)
 
     try:

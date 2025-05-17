@@ -1,1 +1,26 @@
-g1.cr2 -- Compiled OK.
+1sensors.cr2 -- Compile Failed!
+
+line 875: Maximum number of tables 8 exceeded.
+line 891: Maximum number of tables 8 exceeded.
+line 907: Maximum number of tables 8 exceeded.
+line 923: Maximum number of tables 8 exceeded.
+line 939: Maximum number of tables 8 exceeded.
+line 955: Maximum number of tables 8 exceeded.
+line 971: Maximum number of tables 8 exceeded.
+line 987: Maximum number of tables 8 exceeded.
+line 1003: Maximum number of tables 8 exceeded.
+line 1019: Maximum number of tables 8 exceeded.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
