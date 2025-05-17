@@ -1,0 +1,26 @@
+sapflux.cr2 -- Compile Failed!
+
+line 8: Const Name StandardMeasureWait is too large, limit is 16 characters.
+line 9: Const Name AdditionalMeasureWait is too large, limit is 16 characters.
+line 14: Variable AlphaOuter_Value dimension exceeds max of 1.
+line 15: Variable AlphaInner_Value dimension exceeds max of 1.
+line 16: Variable BetaOuter_Value dimension exceeds max of 1.
+line 17: Variable BetaInner_Value dimension exceeds max of 1.
+line 18: Variable tMaxTouter_Value dimension exceeds max of 1.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
