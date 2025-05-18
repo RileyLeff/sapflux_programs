@@ -1,1 +1,3 @@
 cr2cmple.xxx
+*.xxx
+src/__pycache__

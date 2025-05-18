@@ -1,0 +1,56 @@
+'CR300/CR310
+'Test Program for Implexx Sensor M6 Command (Current Temperatures)
+
+'Declare Variables and Units
+Public BattV
+Public PTemp_C
+
+Public M6_Sensor0(4) ' For TdsO, TusO, TdsI, TusI from sensor 0
+
+Alias M6_Sensor0(1) = S0_TdsO
+Alias M6_Sensor0(2) = S0_TusO
+Alias M6_Sensor0(3) = S0_TdsI
+Alias M6_Sensor0(4) = S0_TusI
+
+Units BattV=Volts
+Units PTemp_C=Deg C
+Units S0_TdsO=Deg C
+Units S0_TusO=Deg C
+Units S0_TdsI=Deg C
+Units S0_TusI=Deg C
+
+'Define Data Tables
+DataTable(TestM6Data,True,-1)
+	DataInterval(0,30,Sec,0) ' Log every 30 seconds, no output delay
+	Minimum(1,BattV,FP2,False,False)
+	Sample(1,PTemp_C,FP2)
+	Sample(1,S0_TdsO,FP2)
+	Sample(1,S0_TusO,FP2)
+	Sample(1,S0_TdsI,FP2)
+	Sample(1,S0_TusI,FP2)
+EndTable
+
+'Main Program
+BeginProg
+    Dim N ' Loop counter for error handling
+
+	'Main Scan
+	Scan(30,Sec,1,0) ' Scan every 30 seconds
+		Battery(BattV)
+		PanelTemp(PTemp_C,60) ' Assuming 60Hz, adjust if needed, or PanelTemp(PTemp_C)
+
+        ' Initialize to NAN before measurement attempt
+        Move(M6_Sensor0(),4,NAN,1)
+
+		' Attempt to get M6 data for Sensor 0 using the 7-parameter SDI12Recorder
+        ' Syntax: SDI12Recorder(DestArray(), SDIPort, SDI12AddrStr, SDI12CmdStr, Mult, Offset, FillOption)
+        ' The Implexx M6! command should return 4 values.
+        ' If this syntax works like the M! example, it should handle the D0! implicitly.
+		SDI12Recorder(M6_Sensor0(),C1,"0","M6!",1,0,-1)
+
+		' Reset all measurements if NAN is returned to the first element
+		If M6_Sensor0(1)=NAN Then Move(M6_Sensor0(),4,NAN,1)
+
+		CallTable TestM6Data
+	NextScan
+EndProg

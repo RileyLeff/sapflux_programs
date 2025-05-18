@@ -132,7 +132,7 @@ def generate_code(num_sensors, measure_interval_min, **kwargs):
     crbasic_code_list.append("SequentialMode ' Ensure instructions complete before next")
     crbasic_code_list.append("BeginProg")
     crbasic_code_list.append(f"  Scan (MEAST_INTERVAL_MIN, Min, 0, 0)")
-    crbasic_code_list.append("    PanelTemp (PTemp, 273.15) ' Or remove 273.15 for Celsius")
+    crbasic_code_list.append("    PanelTemp (PTemp) ' ")
     crbasic_code_list.append("    Battery (Batt_volt)")
     crbasic_code_list.append("")
 
