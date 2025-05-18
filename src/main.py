@@ -13,8 +13,9 @@ def main():
         formatter_class=argparse.RawTextHelpFormatter,
         epilog="""\
 Example usage:
-  python %(prog)s --logger-type CR200X -n 2 -t 30 -o sapflux_cr200x.cr2
-  python %(prog)s --logger-type CR300 -n 5 -t 15
+  From project root:
+  uv run python -m src.main --logger-type CR200X -n 2 -t 30 -o generated_programs/sapflux_cr200x.cr2
+  uv run python src/main.py --logger-type CR300 -n 1 -t 15 # (If CWD is project root)
 
 Notes:
   - CR200X generated code uses one DataTable per sensor.
@@ -25,7 +26,7 @@ Notes:
     # --- Required Arguments ---
     parser.add_argument(
         "--logger-type",
-        type=str.upper, # Convert to uppercase for consistent matching
+        type=str.upper,
         required=True,
         choices=["CR200X", "CR300"],
         help="Specify the target datalogger type (e.g., CR200X, CR300)."
@@ -50,18 +51,10 @@ Notes:
         type=str,
         help="Optional: Output filename for the generated CRBasic code."
     )
-    # Add more optional arguments here if needed later, e.g., for selecting measurements for CR300
-    # parser.add_argument(
-    #     "--cr300-measurements", # Example of a logger-specific option
-    #     type=str,
-    #     choices=["standard", "all_20"],
-    #     default="all_20",
-    #     help="For CR300: Specify which set of measurements to collect (default: all_20)."
-    # )
 
     args = parser.parse_args()
 
-    # --- Basic Input Validation (More specific validation in generator modules) ---
+    # --- Basic Input Validation ---
     if args.num_sensors < 1:
         print("Error: Number of sensors must be at least 1.", file=sys.stderr)
         sys.exit(1)
@@ -71,12 +64,12 @@ Notes:
 
     # --- Dynamically select and call the generator module ---
     generated_code = None
-    generator_module_name = None
-    generator_kwargs = {} # For any future specific arguments
+    generator_module_name_short = None # e.g., "cr200x_generator"
+    generator_module_full_path = None  # e.g., "src.cr200x_generator"
+    generator_kwargs = {}
 
     if args.logger_type == "CR200X":
-        generator_module_name = "cr200x_generator"
-        # CR200X specific validation (can also be inside the module)
+        generator_module_name_short = "cr200x_generator"
         # MAX_SENSORS_CR200X_ONE_TABLE_PER_SENSOR is 8
         if not (1 <= args.num_sensors <= 8):
             print(f"Error: For CR200X (one table per sensor), "
@@ -90,7 +83,7 @@ Notes:
                    file=sys.stderr)
 
     elif args.logger_type == "CR300":
-        generator_module_name = "cr300_generator"
+        generator_module_name_short = "cr300_generator"
         # MAX_SDI12_SENSORS_CR300 is 62
         if not (1 <= args.num_sensors <= 62):
             print(f"Error: Number of sensors for CR300 must be between 1 and 62. Requested: {args.num_sensors}",
@@ -101,34 +94,36 @@ Notes:
              print(f"Warning: Implexx sensors recommend a data collect interval of at least 10 minutes. "
                    f"Requested: {args.measure_interval} min.",
                    file=sys.stderr)
-        # Example of passing a logger-specific argument if you add one:
-        # if hasattr(args, 'cr300_measurements'):
-        #    generator_kwargs['measurement_set'] = args.cr300_measurements
     else:
-        # Should not be reached due to 'choices' in argparse
         print(f"Error: Unsupported logger type '{args.logger_type}'.", file=sys.stderr)
         sys.exit(1)
 
+    # Construct the full module path assuming main.py is in 'src' and generators are siblings
+    # This relies on 'src' or its parent being effectively on PYTHONPATH
+    # which `python -m src.main` or `uv run python src/main.py` (from root) should handle.
+    generator_module_full_path = f"src.{generator_module_name_short}"
+
     try:
-        # Dynamically import the module relative to the current package 'src'
-        # The '.' indicates a relative import from the current package.
-        # This assumes main.py is part of the 'src' package.
-        module = importlib.import_module(f".{generator_module_name}", package=__package__)
+        # Dynamically import the module
+        module = importlib.import_module(generator_module_full_path)
         # Call the consistent function name 'generate_code'
         generated_code = module.generate_code(
             num_sensors=args.num_sensors,
             measure_interval_min=args.measure_interval,
             **generator_kwargs
         )
-    except ImportError:
-        print(f"Error: Could not import generator module '{generator_module_name}'. "
-              f"Ensure '{generator_module_name}.py' exists in the 'src' directory.", file=sys.stderr)
+    except ImportError as e:
+        print(f"Error: Could not import generator module '{generator_module_full_path}'. "
+              f"Details: {e}\n"
+              f"Ensure '{generator_module_name_short}.py' exists in the 'src' directory "
+              f"and you are running from the project root (e.g., 'python -m src.main ...' "
+              f"or 'uv run python src/main.py ...').", file=sys.stderr)
         sys.exit(1)
     except AttributeError:
-        print(f"Error: The module '{generator_module_name}' does not have a 'generate_code' function.", file=sys.stderr)
+        print(f"Error: The module '{generator_module_full_path}' does not have a 'generate_code' function.", file=sys.stderr)
         sys.exit(1)
     except Exception as e:
-        print(f"Error during code generation with '{generator_module_name}': {e}", file=sys.stderr)
+        print(f"Error during code generation with '{generator_module_full_path}': {e}", file=sys.stderr)
         sys.exit(1)
 
 
@@ -140,6 +135,11 @@ Notes:
 
         if args.output:
             try:
+                # Ensure the output directory exists if specified in the path
+                import os
+                output_dir = os.path.dirname(args.output)
+                if output_dir and not os.path.exists(output_dir):
+                    os.makedirs(output_dir)
                 with open(args.output, "w") as f:
                     f.write(generated_code)
                 print(f"CRBasic code generated and saved to '{args.output}'.")
