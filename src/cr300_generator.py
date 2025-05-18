@@ -3,17 +3,16 @@
 import sys
 
 # Constants specific to CR300 generation
-MAX_SDI12_SENSORS_CR300 = 62 # Full SDI-12 address space
+MAX_SDI12_SENSORS_CR300 = 62
 MIN_MEASURE_INTERVAL_MINUTES_IMPLEX = 10 # Implexx general recommendation
-STANDARD_MEASURE_WAIT_SEC_IMPLEX = 100 # ~95s for M! type commands + buffer
-ADDITIONAL_MEASURE_WAIT_SEC_IMPLEX = 2  # For M1-M6 type commands (data ready quickly)
 
 # This is the function that main.py will call
 def generate_code(num_sensors, measure_interval_min, **kwargs):
     """
     Generates CRBasic code for CR300 series dataloggers to read
     20 specified measurements from multiple Implexx sap flow sensors.
-    Uses a single data table for all sensors.
+    Uses a single data table for all sensors and the abstracted 7-parameter
+    SDI12Recorder syntax found in CR300 Short Cut examples.
 
     Args:
         num_sensors (int): The number of sensors.
@@ -32,36 +31,48 @@ def generate_code(num_sensors, measure_interval_min, **kwargs):
         return (f"' Error in cr300_generator: Implexx sensors recommend a measurement interval of at least "
                 f"{MIN_MEASURE_INTERVAL_MINUTES_IMPLEX} minutes for reliable data. Requested: {measure_interval_min} min.")
 
-    # Define the 20 measurements of interest, grouped by command sequence
-    # Format: (variable_base_name_suffix, unit_string, sdi_command, d_command_after, num_values_in_D_response, index_in_D_response)
-    # Note: index_in_D_response is 0-indexed based on sensor output, will be mapped to 1-indexed CRBasic array access.
-    measurement_details = [
-        # From M! then D0!
-        ("AlpOut", "ratio", "M!", "D0!", 5, 3),  # AlphaOuter (4th value from aM!aD0!)
-        ("AlpInn", "ratio", "M!", "D0!", 5, 4),  # AlphaInner (5th value from aM!aD0!)
-        # From M! then D1!
-        ("BetOut", "ratio", "M!", "D1!", 4, 0),  # BetaOuter (1st value from aM!aD1!)
-        ("BetInn", "ratio", "M!", "D1!", 4, 1),  # BetaInner (2nd value from aM!aD1!)
-        ("tMxTout", "sec", "M!", "D1!", 4, 2),   # tMaxTouter (3rd value from aM!aD1!)
-        ("tMxTinn", "sec", "M!", "D1!", 4, 3),   # tMaxTinner (4th value from aM!aD1!)
-        # From M1! then D0!
-        ("TpDsOut", "degC", "M1!", "D0!", 6, 0), # TpreDsOuter
-        ("dTDsOut", "degC", "M1!", "D0!", 6, 1), # dTmaxDsOuter
-        ("TsDsOut", "degC", "M1!", "D0!", 6, 2), # TpostDsOuter
-        ("TpUsOut", "degC", "M1!", "D0!", 6, 3), # TpreUsOuter
-        ("dTUsOut", "degC", "M1!", "D0!", 6, 4), # dTmaxUsOuter
-        ("TsUsOut", "degC", "M1!", "D0!", 6, 5), # TpostUsOuter
-        # From M2! then D0!
-        ("TpDsInn", "degC", "M2!", "D0!", 6, 0), # TpreDsInner
-        ("dTDsInn", "degC", "M2!", "D0!", 6, 1), # dTmaxDsInner
-        ("TsDsInn", "degC", "M2!", "D0!", 6, 2), # TpostDsInner
-        ("TpUsInn", "degC", "M2!", "D0!", 6, 3), # TpreUsInner
-        ("dTUsInn", "degC", "M2!", "D0!", 6, 4), # dTmaxUsInner
-        ("TsUsInn", "degC", "M2!", "D0!", 6, 5), # TpostUsInner
-        # From M5! then D0!
-        ("tMxTUsO", "sec", "M5!", "D0!", 2, 0),  # tMaxTusOuter
-        ("tMxTUsI", "sec", "M5!", "D0!", 2, 1)   # tMaxTusInner
+    # Define the structure for the measurements we want to extract.
+    # This will help in creating aliases and assigning data.
+    # (alias_suffix, unit, source_sdi_command, array_size_for_sdi_command, index_in_that_array)
+    # Note: CRBasic array access is 1-indexed.
+    # The SDI12Recorder for "M!" in CR300 example populates 9 values (D0 & D1 combined)
+    # The SDI12Recorder for "M1!"/"M2!" should populate 6 values (D0)
+    # The SDI12Recorder for "M5!" should populate 2 values (D0)
+
+    # Base names for the Public arrays that SDI12Recorder will populate
+    # Suffixes for aliased variables (will become FieldNames)
+    # Units for the aliased variables
+    # Source SDI Command (M!, M1!, M2!, M5!)
+    # Size of the array that the SDI12Recorder call for that command will populate
+    # 1-based index within that populated array for this specific data point
+
+    desired_measurements_config = [
+        # From M! (which implicitly gets D0 and D1, total 9 values)
+        ("AlpOut", "ratio", "M!", 9, 4),  # AlphaOuter is 4th of 9 (D0's 4th)
+        ("AlpInn", "ratio", "M!", 9, 5),  # AlphaInner is 5th of 9 (D0's 5th)
+        ("BetOut", "ratio", "M!", 9, 6),  # BetaOuter is 6th of 9 (D1's 1st)
+        ("BetInn", "ratio", "M!", 9, 7),  # BetaInner is 7th of 9 (D1's 2nd)
+        ("tMxTout", "sec", "M!", 9, 8),   # tMaxTouter is 8th of 9 (D1's 3rd)
+        ("tMxTinn", "sec", "M!", 9, 9),   # tMaxTinner is 9th of 9 (D1's 4th)
+        # From M1! (implicitly gets D0, total 6 values)
+        ("TpDsOut", "degC", "M1!", 6, 1), # TpreDsOuter
+        ("dTDsOut", "degC", "M1!", 6, 2), # dTmaxDsOuter
+        ("TsDsOut", "degC", "M1!", 6, 3), # TpostDsOuter
+        ("TpUsOut", "degC", "M1!", 6, 4), # TpreUsOuter
+        ("dTUsOut", "degC", "M1!", 6, 5), # dTmaxUsOuter
+        ("TsUsOut", "degC", "M1!", 6, 6), # TpostUsOuter
+        # From M2! (implicitly gets D0, total 6 values)
+        ("TpDsInn", "degC", "M2!", 6, 1), # TpreDsInner
+        ("dTDsInn", "degC", "M2!", 6, 2), # dTmaxDsInner
+        ("TsDsInn", "degC", "M2!", 6, 3), # TpostDsInner
+        ("TpUsInn", "degC", "M2!", 6, 4), # TpreUsInner
+        ("dTUsInn", "degC", "M2!", 6, 5), # dTmaxUsInner
+        ("TsUsInn", "degC", "M2!", 6, 6), # TpostUsInner
+        # From M5! (implicitly gets D0, total 2 values)
+        ("tMxTUsO", "sec", "M5!", 2, 1),  # tMaxTusOuter
+        ("tMxTUsI", "sec", "M5!", 2, 2)   # tMaxTusInner
     ]
+
 
     # Helper to get SDI-12 address character (0-9, a-z, A-Z)
     def get_sdi12_address_char(index):
@@ -83,164 +94,110 @@ def generate_code(num_sensors, measure_interval_min, **kwargs):
     # --- Constants ---
     crbasic_code_list.append("'--- Constants ---")
     crbasic_code_list.append(f"Const MEAST_INTERVAL_MIN = {measure_interval_min}")
-    crbasic_code_list.append(f"Const SDI12_PORT = C1 ' Default SDI-12 Port on CR300 (can be C1, C2, etc.)")
-    crbasic_code_list.append(f"Const STD_MEAS_WAIT_MS = {STANDARD_MEASURE_WAIT_SEC_IMPLEX * 1000} ' For M! type commands")
-    crbasic_code_list.append(f"Const ADD_MEAS_WAIT_MS = {ADDITIONAL_MEASURE_WAIT_SEC_IMPLEX * 1000} ' For M1-M6 type commands")
+    crbasic_code_list.append(f"Const SDI12_PORT = C1 ' Default SDI-12 Port (e.g., C1, C2)")
     crbasic_code_list.append("")
 
     # --- Declare Public Variables ---
     crbasic_code_list.append("'--- Declare Public Variables ---")
-    crbasic_code_list.append("Public PTemp As Float")
+    crbasic_code_list.append("Public PTemp_C As Float") # Renamed from PTemp for clarity
     crbasic_code_list.append("Public Batt_volt As Float")
-    crbasic_code_list.append("")
-    crbasic_code_list.append("' Variables to hold the measurements for each sensor")
-    # Create a flat list of all variable names that will be logged for DataTable
-    all_data_table_vars = []
-    for i in range(num_sensors):
-        sdi_char = get_sdi12_address_char(i)
-        for var_suffix, unit, _, _, _, _ in measurement_details:
-            var_name = f"S{sdi_char}_{var_suffix}" # e.g., S0_AlpOut, Sa_AlpOut
-            crbasic_code_list.append(f"Public {var_name} As Float : Units {var_name}={unit}")
-            all_data_table_vars.append(var_name)
+    crbasic_code_list.append("Dim N_Loop ' Generic loop counter for error handling") # Single loop counter
     crbasic_code_list.append("")
 
-    # Temporary arrays for SDI12Recorder to read into. Max size needed is 6 (for M1/D0, M2/D0).
-    crbasic_code_list.append("' Temporary array for SDI12Recorder responses")
-    crbasic_code_list.append("Dim TempSDIRd(6) As Float ' Max 6 values from any single D0! call")
+    # Declare Public arrays for SDI12Recorder for each command type and sensor
+    # These arrays will be populated by the abstracted SDI12Recorder calls
+    # Example: S0_M_Data(9), S0_M1_Data(6), S0_M2_Data(6), S0_M5_Data(2)
+    sdi_command_array_map = {} # To store array names like "S0_M_Data"
+    for i in range(num_sensors):
+        sdi_char = get_sdi12_address_char(i)
+        # Create unique arrays for each sensor and each type of M command that returns data
+        for sdi_cmd_base in ["M", "M1", "M2", "M5"]: # "M" implies M!
+            # Determine array size based on the first config entry for that command
+            array_size = 0
+            for _, _, cmd_conf, size_conf, _ in desired_measurements_config:
+                if cmd_conf == sdi_cmd_base + "!": # Match M!, M1!, etc.
+                    array_size = size_conf
+                    break
+            if array_size > 0:
+                array_name = f"S{sdi_char}_{sdi_cmd_base}_Data" # e.g., S0_M_Data, Sa_M1_Data
+                sdi_command_array_map[(i, sdi_cmd_base + "!")] = array_name
+                crbasic_code_list.append(f"Public {array_name}({array_size}) As Float")
     crbasic_code_list.append("")
-    crbasic_code_list.append("Dim SDI12CmdString As String * 10 ' For commands like aM!, aD0!")
-    crbasic_code_list.append("Dim SDI12AddrChar As String * 1  ' For single address character")
-    crbasic_code_list.append("Dim SDI12BaseCmd As String * 3   ' For M!, D0!, M1!, etc.")
-    crbasic_code_list.append("Dim SDI12ReturnCode As Long")
-    crbasic_code_list.append("Dim SDI12ExpectedValues As Long ' For atttn 'n' response from M/C commands")
+
+    # Declare Aliases for the specific data points we want to log
+    # These Aliases will point into the S{sdi_char}_{sdi_cmd_base}_Data arrays
+    crbasic_code_list.append("'--- Alias Declarations (for logged variables) ---")
+    all_data_table_vars = [] # For defining the DataTable
+    for i in range(num_sensors):
+        sdi_char = get_sdi12_address_char(i)
+        for alias_suffix, unit, sdi_cmd, _, index_in_sdi_array in desired_measurements_config:
+            source_array_name = sdi_command_array_map[(i, sdi_cmd)]
+            final_var_name = f"S{sdi_char}_{alias_suffix}" # e.g., S0_AlpOut
+            crbasic_code_list.append(f"Alias {source_array_name}({index_in_sdi_array}) = {final_var_name} : Units {final_var_name}={unit}")
+            all_data_table_vars.append(final_var_name)
     crbasic_code_list.append("")
 
 
     # --- DataTable Definition ---
     crbasic_code_list.append("'--- DataTable Definition (Single Table for All Sensors) ---")
     crbasic_code_list.append("DataTable (SapFlowAll, True, -1)")
-    crbasic_code_list.append(f"  DataInterval (0, MEAST_INTERVAL_MIN, Min, 0)")
+    crbasic_code_list.append(f"  DataInterval (0, MEAST_INTERVAL_MIN, Min, 0) ' No output delay")
     crbasic_code_list.append("  Sample (1, Batt_volt, FP2)")
-    crbasic_code_list.append("  Sample (1, PTemp, FP2)")
+    crbasic_code_list.append("  Sample (1, PTemp_C, FP2)")
     for var_name in all_data_table_vars:
-        crbasic_code_list.append(f"  Sample (1, {var_name}, IEEE4)")
+        crbasic_code_list.append(f"  Sample (1, {var_name}, IEEE4)") # Use IEEE4 for float precision
     crbasic_code_list.append("EndTable")
     crbasic_code_list.append("")
 
     # --- Main Program ---
     crbasic_code_list.append("'--- Main Program ---")
-    crbasic_code_list.append("SequentialMode ' Ensure instructions complete before next")
+    # CR300 example does not use SequentialMode, relies on SDI12Recorder blocking.
+    # Let's try without it first, matching the new CR300 Short Cut example.
+    # If timing issues arise, SequentialMode can be added.
     crbasic_code_list.append("BeginProg")
-    crbasic_code_list.append(f"  Scan (MEAST_INTERVAL_MIN, Min, 0, 0)")
-    crbasic_code_list.append("    PanelTemp (PTemp) ' ")
+    crbasic_code_list.append(f"  Scan (MEAST_INTERVAL_MIN, Min, 1, 0) ' Scan interval, units, buffer=1, count=0 (continuous)")
+    crbasic_code_list.append("    PanelTemp (PTemp_C, 60) ' Defaulting to 60Hz fnotch, or use PanelTemp(PTemp_C)")
     crbasic_code_list.append("    Battery (Batt_volt)")
+    crbasic_code_list.append("")
+
+    # Initialize all aliased data variables to NAN at the start of each scan
+    crbasic_code_list.append("    ' Initialize all sensor data variables to NAN")
+    for var_name in all_data_table_vars:
+        crbasic_code_list.append(f"    {var_name} = NAN")
     crbasic_code_list.append("")
 
     for i in range(num_sensors):
         sdi_char = get_sdi12_address_char(i)
         crbasic_code_list.append(f"    ' --- Sensor {sdi_char} (Address \"{sdi_char}\") ---")
-        crbasic_code_list.append(f"    SDI12AddrChar = \"{sdi_char}\"")
+
+        # --- Standard Measurement (M!) ---
+        # This call is assumed to be blocking for ~100s and retrieve all 9 values
+        sdi_cmd_m = "M!"
+        array_name_m = sdi_command_array_map[(i, sdi_cmd_m)]
+        num_values_m = 9 # For M! + D0/D1
+        crbasic_code_list.append(f"    SDI12Recorder({array_name_m}(), SDI12_PORT, \"{sdi_char}\", \"{sdi_cmd_m}\", 1.0, 0, -1)")
+        crbasic_code_list.append(f"    If {array_name_m}(1) = NAN Then ' Check if first value is NAN (measurement failed)")
+        crbasic_code_list.append(f"      Move ({array_name_m}(), {num_values_m}, NAN, 1) ' Set all elements of this array to NAN")
+        crbasic_code_list.append(f"    EndIf")
         crbasic_code_list.append("")
 
-        # Standard M! command sequence (for Alpha, Beta, tMax values)
-        crbasic_code_list.append("    ' Standard Measurement (M!)")
-        crbasic_code_list.append("    SDI12BaseCmd = \"M!\"")
-        crbasic_code_list.append("    SDI12CmdString = SDI12AddrChar + SDI12BaseCmd")
-        crbasic_code_list.append("    SDI12Recorder (SDI12ReturnCode, SDI12_PORT, SDI12CmdString, SDI12ExpectedValues, 1.0, 0)")
-        crbasic_code_list.append("    If SDI12ReturnCode = 0 Then")
-        crbasic_code_list.append("      Delay (0, STD_MEAS_WAIT_MS, mSec)")
-        # D0! for M!
-        crbasic_code_list.append("      SDI12BaseCmd = \"D0!\"")
-        crbasic_code_list.append("      SDI12CmdString = SDI12AddrChar + SDI12BaseCmd")
-        crbasic_code_list.append("      SDI12Recorder (SDI12ReturnCode, SDI12_PORT, SDI12CmdString, TempSDIRd(1), 1.0, 0, -1, 5)") # Read 5 values
-        crbasic_code_list.append("      If SDI12ReturnCode = 0 Then")
-        crbasic_code_list.append(f"        S{sdi_char}_AlpOut = TempSDIRd(4)")
-        crbasic_code_list.append(f"        S{sdi_char}_AlpInn = TempSDIRd(5)")
-        crbasic_code_list.append("      Else")
-        crbasic_code_list.append(f"        S{sdi_char}_AlpOut = NAN : S{sdi_char}_AlpInn = NAN")
-        crbasic_code_list.append("      EndIf")
-        # D1! for M!
-        crbasic_code_list.append("      SDI12BaseCmd = \"D1!\"")
-        crbasic_code_list.append("      SDI12CmdString = SDI12AddrChar + SDI12BaseCmd")
-        crbasic_code_list.append("      SDI12Recorder (SDI12ReturnCode, SDI12_PORT, SDI12CmdString, TempSDIRd(1), 1.0, 0, -1, 4)") # Read 4 values
-        crbasic_code_list.append("      If SDI12ReturnCode = 0 Then")
-        crbasic_code_list.append(f"        S{sdi_char}_BetOut = TempSDIRd(1)")
-        crbasic_code_list.append(f"        S{sdi_char}_BetInn = TempSDIRd(2)")
-        crbasic_code_list.append(f"        S{sdi_char}_tMxTout = TempSDIRd(3)")
-        crbasic_code_list.append(f"        S{sdi_char}_tMxTinn = TempSDIRd(4)")
-        crbasic_code_list.append("      Else")
-        crbasic_code_list.append(f"        S{sdi_char}_BetOut = NAN : S{sdi_char}_BetInn = NAN : S{sdi_char}_tMxTout = NAN : S{sdi_char}_tMxTinn = NAN")
-        crbasic_code_list.append("      EndIf")
-        crbasic_code_list.append("    Else")
-        crbasic_code_list.append(f"      S{sdi_char}_AlpOut = NAN : S{sdi_char}_AlpInn = NAN : S{sdi_char}_BetOut = NAN : S{sdi_char}_BetInn = NAN : S{sdi_char}_tMxTout = NAN : S{sdi_char}_tMxTinn = NAN")
-        crbasic_code_list.append("    EndIf")
-        crbasic_code_list.append("")
+        # --- Additional Measurements (M1!, M2!, M5!) ---
+        # These are assumed to be quick, blocking calls retrieving their respective data
+        for sdi_cmd_base in ["M1", "M2", "M5"]:
+            sdi_cmd_add = sdi_cmd_base + "!"
+            array_name_add = sdi_command_array_map[(i, sdi_cmd_add)]
+            num_values_add = 0
+            for _, _, cmd_conf, size_conf, _ in desired_measurements_config:
+                if cmd_conf == sdi_cmd_add:
+                    num_values_add = size_conf
+                    break
 
-        # M1! Command (Outer Temps)
-        crbasic_code_list.append("    ' M1! - Outer Thermistor Temperatures")
-        crbasic_code_list.append("    SDI12BaseCmd = \"M1!\"")
-        crbasic_code_list.append("    SDI12CmdString = SDI12AddrChar + SDI12BaseCmd")
-        crbasic_code_list.append("    SDI12Recorder (SDI12ReturnCode, SDI12_PORT, SDI12CmdString, SDI12ExpectedValues, 1.0, 0)")
-        crbasic_code_list.append("    If SDI12ReturnCode = 0 Then")
-        crbasic_code_list.append("      Delay (0, ADD_MEAS_WAIT_MS, mSec)")
-        crbasic_code_list.append("      SDI12BaseCmd = \"D0!\"")
-        crbasic_code_list.append("      SDI12CmdString = SDI12AddrChar + SDI12BaseCmd")
-        crbasic_code_list.append("      SDI12Recorder (SDI12ReturnCode, SDI12_PORT, SDI12CmdString, TempSDIRd(1), 1.0, 0, -1, 6)") # Read 6 values
-        crbasic_code_list.append("      If SDI12ReturnCode = 0 Then")
-        crbasic_code_list.append(f"        S{sdi_char}_TpDsOut = TempSDIRd(1) : S{sdi_char}_dTDsOut = TempSDIRd(2) : S{sdi_char}_TsDsOut = TempSDIRd(3)")
-        crbasic_code_list.append(f"        S{sdi_char}_TpUsOut = TempSDIRd(4) : S{sdi_char}_dTUsOut = TempSDIRd(5) : S{sdi_char}_TsUsOut = TempSDIRd(6)")
-        crbasic_code_list.append("      Else")
-        crbasic_code_list.append(f"        S{sdi_char}_TpDsOut = NAN : S{sdi_char}_dTDsOut = NAN : S{sdi_char}_TsDsOut = NAN : S{sdi_char}_TpUsOut = NAN : S{sdi_char}_dTUsOut = NAN : S{sdi_char}_TsUsOut = NAN")
-        crbasic_code_list.append("      EndIf")
-        crbasic_code_list.append("    Else")
-        crbasic_code_list.append(f"      S{sdi_char}_TpDsOut = NAN : S{sdi_char}_dTDsOut = NAN : S{sdi_char}_TsDsOut = NAN : S{sdi_char}_TpUsOut = NAN : S{sdi_char}_dTUsOut = NAN : S{sdi_char}_TsUsOut = NAN")
-        crbasic_code_list.append("    EndIf")
-        crbasic_code_list.append("")
-
-        # M2! Command (Inner Temps)
-        crbasic_code_list.append("    ' M2! - Inner Thermistor Temperatures")
-        crbasic_code_list.append("    SDI12BaseCmd = \"M2!\"")
-        # ... (similar structure as M1!) ...
-        crbasic_code_list.append("    SDI12CmdString = SDI12AddrChar + SDI12BaseCmd")
-        crbasic_code_list.append("    SDI12Recorder (SDI12ReturnCode, SDI12_PORT, SDI12CmdString, SDI12ExpectedValues, 1.0, 0)")
-        crbasic_code_list.append("    If SDI12ReturnCode = 0 Then")
-        crbasic_code_list.append("      Delay (0, ADD_MEAS_WAIT_MS, mSec)")
-        crbasic_code_list.append("      SDI12BaseCmd = \"D0!\"")
-        crbasic_code_list.append("      SDI12CmdString = SDI12AddrChar + SDI12BaseCmd")
-        crbasic_code_list.append("      SDI12Recorder (SDI12ReturnCode, SDI12_PORT, SDI12CmdString, TempSDIRd(1), 1.0, 0, -1, 6)")
-        crbasic_code_list.append("      If SDI12ReturnCode = 0 Then")
-        crbasic_code_list.append(f"        S{sdi_char}_TpDsInn = TempSDIRd(1) : S{sdi_char}_dTDsInn = TempSDIRd(2) : S{sdi_char}_TsDsInn = TempSDIRd(3)")
-        crbasic_code_list.append(f"        S{sdi_char}_TpUsInn = TempSDIRd(4) : S{sdi_char}_dTUsInn = TempSDIRd(5) : S{sdi_char}_TsUsInn = TempSDIRd(6)")
-        crbasic_code_list.append("      Else")
-        crbasic_code_list.append(f"        S{sdi_char}_TpDsInn = NAN : S{sdi_char}_dTDsInn = NAN : S{sdi_char}_TsDsInn = NAN : S{sdi_char}_TpUsInn = NAN : S{sdi_char}_dTUsInn = NAN : S{sdi_char}_TsUsInn = NAN")
-        crbasic_code_list.append("      EndIf")
-        crbasic_code_list.append("    Else")
-        crbasic_code_list.append(f"      S{sdi_char}_TpDsInn = NAN : S{sdi_char}_dTDsInn = NAN : S{sdi_char}_TsDsInn = NAN : S{sdi_char}_TpUsInn = NAN : S{sdi_char}_dTUsInn = NAN : S{sdi_char}_TsUsInn = NAN")
-        crbasic_code_list.append("    EndIf")
-        crbasic_code_list.append("")
-
-        # M5! Command (Upstream Max Temp Times)
-        crbasic_code_list.append("    ' M5! - Upstream Thermistor Max Temp Times")
-        crbasic_code_list.append("    SDI12BaseCmd = \"M5!\"")
-        # ... (similar structure as M1!) ...
-        crbasic_code_list.append("    SDI12CmdString = SDI12AddrChar + SDI12BaseCmd")
-        crbasic_code_list.append("    SDI12Recorder (SDI12ReturnCode, SDI12_PORT, SDI12CmdString, SDI12ExpectedValues, 1.0, 0)")
-        crbasic_code_list.append("    If SDI12ReturnCode = 0 Then")
-        crbasic_code_list.append("      Delay (0, ADD_MEAS_WAIT_MS, mSec)")
-        crbasic_code_list.append("      SDI12BaseCmd = \"D0!\"")
-        crbasic_code_list.append("      SDI12CmdString = SDI12AddrChar + SDI12BaseCmd")
-        crbasic_code_list.append("      SDI12Recorder (SDI12ReturnCode, SDI12_PORT, SDI12CmdString, TempSDIRd(1), 1.0, 0, -1, 2)")
-        crbasic_code_list.append("      If SDI12ReturnCode = 0 Then")
-        crbasic_code_list.append(f"        S{sdi_char}_tMxTUsO = TempSDIRd(1)")
-        crbasic_code_list.append(f"        S{sdi_char}_tMxTUsI = TempSDIRd(2)")
-        crbasic_code_list.append("      Else")
-        crbasic_code_list.append(f"        S{sdi_char}_tMxTUsO = NAN : S{sdi_char}_tMxTUsI = NAN")
-        crbasic_code_list.append("      EndIf")
-        crbasic_code_list.append("    Else")
-        crbasic_code_list.append(f"      S{sdi_char}_tMxTUsO = NAN : S{sdi_char}_tMxTUsI = NAN")
-        crbasic_code_list.append("    EndIf")
-        crbasic_code_list.append("")
-
+            crbasic_code_list.append(f"    ' {sdi_cmd_add} Measurement")
+            crbasic_code_list.append(f"    SDI12Recorder({array_name_add}(), SDI12_PORT, \"{sdi_char}\", \"{sdi_cmd_add}\", 1.0, 0, -1)")
+            crbasic_code_list.append(f"    If {array_name_add}(1) = NAN Then")
+            crbasic_code_list.append(f"      Move ({array_name_add}(), {num_values_add}, NAN, 1)")
+            crbasic_code_list.append(f"    EndIf")
+            crbasic_code_list.append("")
 
     crbasic_code_list.append("    CallTable SapFlowAll")
     crbasic_code_list.append("  NextScan")
@@ -259,22 +216,29 @@ if __name__ == "__main__":
         print(f"Error in generation: {test_code_1}")
     else:
         print(test_code_1)
-        # To fully test, you would save this output to a .cr3 file and compile
-        # with a CR300 series compiler (e.g., from LoggerNet or PC400).
-        # with open("temp_cr300_test.cr3", "w") as f:
+        # To fully test, save to .cr3 and compile with CR300 compiler
+        # with open("temp_cr300_generated.cr3", "w") as f:
         #     f.write(test_code_1)
-        # print("\nCR300 code generated to temp_cr300_test.cr3")
+        # print("\nCR300 code generated to temp_cr300_generated.cr3")
 
     print("\n--- Test Case 2: Sensor index requiring char 'a' (sensor 11, index 10) ---")
     test_code_11_sensors = generate_code(num_sensors=11, measure_interval_min=15)
     if "' Error:" in test_code_11_sensors:
          print(f"Error in generation: {test_code_11_sensors}")
     else:
-        print(f"\nGenerated code for 11 sensors (showing part for sensor 'a'):")
-        # Print a snippet relevant to sensor 'a'
+        # print(f"\nGenerated code for 11 sensors (showing part for sensor 'a'):")
         # for line in test_code_11_sensors.splitlines():
-        #     if "Sensor a" in line or "Sa_" in line or "SDI12AddrChar = \"a\"" in line:
+        #     if "Sa_" in line or "Sensor a" in line: # Quick check
         #         print(line)
+        pass # Full printout is too long for quick check
+
+    print("\n--- Test Case 3: Interval too short (e.g., 5 min) ---")
+    test_code_interval_fail = generate_code(num_sensors=1, measure_interval_min=5)
+    if "' Error:" in test_code_interval_fail:
+        print(f"Expected Error: {test_code_interval_fail}")
+    else:
+        print("Error: Validation for interval too short failed for CR300 in module.")
+        print(test_code_interval_fail)
 
 
     print("\n--- Direct module testing complete ---")
